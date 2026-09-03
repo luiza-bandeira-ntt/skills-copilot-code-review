@@ -1,5 +1,5 @@
 ---
-applyTo: "backend/**/*,*.py"
+applyTo: "src/backend/**/*,src/app.py"
 ---
 
 ## Backend Guidelines
