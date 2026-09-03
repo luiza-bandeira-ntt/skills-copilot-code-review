@@ -2,7 +2,9 @@
 MongoDB database configuration and setup for Mergington High School API
 """
 
-from pymongo import MongoClient
+from datetime import datetime, timedelta, timezone
+
+from pymongo import ASCENDING, MongoClient
 from argon2 import PasswordHasher, exceptions as argon2_exceptions
 
 # Connect to MongoDB
@@ -10,6 +12,8 @@ client = MongoClient('mongodb://localhost:27017/')
 db = client['mergington_high']
 activities_collection = db['activities']
 teachers_collection = db['teachers']
+announcements_collection = db['announcements']
+sessions_collection = db['sessions']
 
 # Methods
 
@@ -39,6 +43,8 @@ def verify_password(hashed_password: str, plain_password: str) -> bool:
 def init_database():
     """Initialize database if empty"""
 
+    create_indexes()
+
     # Initialize activities if empty
     if activities_collection.count_documents({}) == 0:
         for name, details in initial_activities.items():
@@ -49,6 +55,21 @@ def init_database():
         for teacher in initial_teachers:
             teachers_collection.insert_one(
                 {"_id": teacher["username"], **teacher})
+
+    # Initialize announcements if empty
+    if announcements_collection.count_documents({}) == 0:
+        for announcement in build_initial_announcements():
+            announcements_collection.insert_one(announcement)
+
+
+def create_indexes():
+    """Create the indexes the API relies on"""
+    # Supports the announcement visibility query run on every page load
+    announcements_collection.create_index(
+        [("expiration_date", ASCENDING), ("start_date", ASCENDING)])
+
+    # Lets MongoDB expire stale login sessions on its own
+    sessions_collection.create_index("expires_at", expireAfterSeconds=0)
 
 
 # Initial database if empty
@@ -207,3 +228,21 @@ initial_teachers = [
         "role": "admin"
     }
 ]
+
+
+def build_initial_announcements():
+    """Example announcements, dated relative to first startup so they stay current."""
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    return [
+        {
+            "title": "Registration is open",
+            "message": (
+                "Activity registration is open until the end of the month. "
+                "Don't lose your spot!"
+            ),
+            "start_date": None,
+            "expiration_date": now + timedelta(days=30),
+            "created_by": "principal",
+            "created_at": now
+        }
+    ]
