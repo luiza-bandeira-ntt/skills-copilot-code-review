@@ -70,7 +70,7 @@ def get_available_days() -> List[str]:
 def signup_for_activity(
     activity_name: str,
     email: str,
-    teacher: Dict[str, Any] = Depends(get_current_teacher)
+    _teacher: Dict[str, Any] = Depends(get_current_teacher)
 ):
     """Sign up a student for an activity - requires teacher authentication"""
     # Get the activity
