@@ -2,10 +2,19 @@
 Authentication endpoints for the High School Management System API
 """
 
-from fastapi import APIRouter, HTTPException
-from typing import Dict, Any
+from typing import Any, Dict
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials
+from pydantic import BaseModel, Field
 
 from ..database import teachers_collection, verify_password
+from ..security import (
+    bearer_scheme,
+    create_session,
+    delete_session,
+    get_current_teacher,
+)
 
 router = APIRouter(
     prefix="/auth",
@@ -13,35 +22,51 @@ router = APIRouter(
 )
 
 
+class LoginRequest(BaseModel):
+    """Credentials sent in the request body so they never reach access logs"""
+
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=200)
+
+
+def _public_profile(teacher: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "username": teacher["username"],
+        "display_name": teacher["display_name"],
+        "role": teacher["role"]
+    }
+
+
 @router.post("/login")
-def login(username: str, password: str) -> Dict[str, Any]:
-    """Login a teacher account"""
-    # Find the teacher in the database
-    teacher = teachers_collection.find_one({"_id": username})
+def login(payload: LoginRequest) -> Dict[str, Any]:
+    """Login a teacher account and start a session"""
+    teacher = teachers_collection.find_one({"_id": payload.username})
 
     # Verify password using Argon2 verifier from database.py
-    if not teacher or not verify_password(teacher.get("password", ""), password):
+    if not teacher or not verify_password(teacher.get("password", ""), payload.password):
         raise HTTPException(
             status_code=401, detail="Invalid username or password")
 
-    # Return teacher information (excluding password)
     return {
-        "username": teacher["username"],
-        "display_name": teacher["display_name"],
-        "role": teacher["role"]
+        "token": create_session(teacher["username"]),
+        **_public_profile(teacher)
     }
+
+
+@router.post("/logout")
+def logout(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)
+) -> Dict[str, str]:
+    """End the current session"""
+    if credentials:
+        delete_session(credentials.credentials)
+
+    return {"message": "Logged out"}
 
 
 @router.get("/check-session")
-def check_session(username: str) -> Dict[str, Any]:
-    """Check if a session is valid by username"""
-    teacher = teachers_collection.find_one({"_id": username})
-
-    if not teacher:
-        raise HTTPException(status_code=404, detail="Teacher not found")
-
-    return {
-        "username": teacher["username"],
-        "display_name": teacher["display_name"],
-        "role": teacher["role"]
-    }
+def check_session(
+    teacher: Dict[str, Any] = Depends(get_current_teacher)
+) -> Dict[str, Any]:
+    """Return the profile tied to the session token"""
+    return _public_profile(teacher)
